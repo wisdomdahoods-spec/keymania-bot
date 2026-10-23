@@ -1,17 +1,8 @@
 {
-  "dependencies": {
-    "discord.js": "^14.27.0",
-    "dotenv": "^18.0.9"
-  },
-  "name": "keymania_bot",
+  "name": "keymania-bot",
   "version": "1.0.0",
-  "description": "",
   "main": "keymania.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  "dependencies": {
+    "discord.js": "^14.14.1"
+  }
 }
