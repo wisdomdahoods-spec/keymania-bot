@@ -6,7 +6,7 @@ const CONFIG = {
   prefix: '!',
   autoRefillAmount: 5,      // Auto-add this many accounts when service runs out
   token: process.env.DISCORD_BOT_TOKEN || '',
-  adminIds: ['PUT_YOUR_DISCORD_ID_HERE'] // Your Discord ID
+  adminIds: ['711334755328720947'] // Your Discord ID
 };
 
 // ─── FILE HELPERS ───────────────────────────────
