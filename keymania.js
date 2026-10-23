@@ -5,7 +5,7 @@ const fs = require('fs');
 const CONFIG = {
   prefix: '!',
   token: process.env.DISCORD_BOT_TOKEN || '',
-  adminIds: ['PUT_YOUR_DISCORD_ID_HERE'], // Your Discord ID
+  adminIds: ['711334755328720947'], // Your Discord ID
   cooldownRoleId: '1561407866584178748',
   cooldownMs: 3 * 60 * 60 * 1000 // 3 hours
 };
