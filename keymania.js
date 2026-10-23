@@ -5,7 +5,7 @@ const fs = require('fs');
 const CONFIG = {
   prefix: '!',
   token: process.env.DISCORD_BOT_TOKEN || '',
-  adminIds: ['711334755328720947'], // Your Discord ID
+  adminIds: ['711334755328720947'], // ← YOUR ID HERE
   cooldownRoleId: '1561407866584178748',
   cooldownMs: 3 * 60 * 60 * 1000 // 3 hours
 };
@@ -29,15 +29,16 @@ function setCooldown(userId) {
 
 // ─── FILE HELPERS ───────────────────────────────
 function loadJSON(path, fallback = {}) {
-  try { return fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : fallback; }
-  catch { return fallback; }
+  try {
+    return fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : fallback;
+  } catch { return fallback; }
 }
 
 function saveJSON(path, data) {
   fs.writeFileSync(path, JSON.stringify(data, null, 2));
 }
 
-// ─── STOCK ──────────────────────────────────────
+// ─── STOCK MANAGEMENT ────────────────────────────
 function getStock() { return loadJSON('./stock.json', {}); }
 
 function takeAccount(serviceName) {
@@ -83,7 +84,11 @@ client.on('messageCreate', async message => {
 
     ['paypal', 'fortnite', 'aboodi', 'valorant'].forEach(svc => {
       const n = stock[svc]?.length || 0;
-      embed.addFields({ name: svc, value: n > 0 ? `${n} in stock` : 'undefined in stock', inline: true });
+      embed.addFields({
+        name: svc,
+        value: n > 0 ? `✅ ${n} in stock` : `❌ undefined in stock`,
+        inline: true
+      });
     });
     return message.reply({ embeds: [embed] });
   }
@@ -96,7 +101,7 @@ client.on('messageCreate', async message => {
     // Cooldown check
     const hasRole = message.guild?.members.cache.get(message.author.id)?.roles.cache.has(CONFIG.cooldownRoleId);
     if (hasRole && isOnCooldown(message.author.id)) {
-      return message.reply(`⏳ You're on cooldown! Wait **${getRemainingTime(message.author.id)}** before generating again.`);
+      return message.reply(`⏳ You're on cooldown! Please wait **${getRemainingTime(message.author.id)}** before generating again.`);
     }
 
     const account = takeAccount(serviceName);
@@ -110,29 +115,33 @@ client.on('messageCreate', async message => {
 
     if (hasRole) setCooldown(message.author.id);
 
-    // ─── EXACT STYLE FROM YOUR SCREENSHOT ───────
-    const claimEmbed = new EmbedBuilder()
+    // ─── 🔥 THE SEXY DM EMBED 🔥 ───────────────
+    const dmEmbed = new EmbedBuilder()
       .setTitle('✨ YOUR PREMIUM ACCOUNT ✨')
-      .setColor('#9b59b6')
+      .setColor('#c084fc')
+      .setThumbnail('https://i.imgur.com/8Z7xQ9L.png')
       .addFields(
-        { name: '', value: '✅ **CLAIMED — YOURS ALONE**', inline: false },
-        { name: 'Service', value: serviceName, inline: false },
-        { name: 'Credentials', value: `\`${account}\``, inline: false },
-        { name: '🔒 Security', value: 
+        { name: '✅ STATUS', value: '**CLAIMED — YOURS ALONE**', inline: false },
+        { name: '📦 SERVICE', value: `\`${serviceName}\``, inline: true },
+        { name: '🔐 CREDENTIALS', value: `\`\`\`${account}\`\`\``, inline: false },
+        { name: '🔒 SECURITY INFO', value: 
           '• This account is **PERMANENTLY** removed from stock\n' +
           '• No one else can ever claim it\n' +
-          '• Change password immediately\n' +
-          '• Not resellable',
+          '• Change password & email immediately\n' +
+          '• Not resellable — for your use only',
           inline: false
         }
       )
-      .setFooter({ text: 'Keymania • Yours exclusively 💜 • Today at ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) });
+      .setFooter({ 
+        text: `Keymania • Yours exclusively 💜 • ${new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'})}`,
+        iconURL: 'https://i.imgur.com/8Z7xQ9L.png'
+      });
 
     try {
-      await message.author.send({ embeds: [claimEmbed] });
-      message.reply(`✅ Your **${serviceName}** account has been sent to your DMs!`);
+      await message.author.send({ embeds: [dmEmbed] });
+      message.reply(`✅ Sent your **${serviceName}** account — check your DMs! 💜`);
     } catch {
-      message.reply({ embeds: [claimEmbed] });
+      message.reply({ embeds: [dmEmbed] });
     }
     return;
   }
@@ -144,15 +153,16 @@ client.on('messageCreate', async message => {
     }
     const serviceName = args.shift()?.toLowerCase();
     if (!serviceName) {
-      return message.reply('❌ Usage: `!restock fortnite`\\n`email:password`');
+      return message.reply('❌ Usage:\n`!restock fortnite`\n`email:password`');
     }
     const accounts = message.content.split('\n').slice(1)
       .map(l => l.trim()).filter(l => l && l.includes(':'));
+    
     if (!accounts.length) {
-      return message.reply('❌ No valid accounts found — use format: `email:password` one per line');
+      return message.reply('❌ No valid accounts found — format: `email:password` one per line');
     }
     const total = addAccounts(serviceName, accounts);
-    return message.reply(`✅ Added **${accounts.length}** accounts to **${serviceName}** — total: ${total}`);
+    return message.reply(`✅ Added **${accounts.length}** to **${serviceName}** — total: ${total}`);
   }
 
   // ─── !clearstock ──────────────────────────────
