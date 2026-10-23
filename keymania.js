@@ -4,10 +4,32 @@ const fs = require('fs');
 // ─── CONFIG ──────────────────────────────────────
 const CONFIG = {
   prefix: '!',
-  autoRefillAmount: 5,      // Auto-add this many accounts when service runs out
   token: process.env.DISCORD_BOT_TOKEN || '',
-  adminIds: ['711334755328720947'] // Your Discord ID
+  adminIds: ['PUT_YOUR_DISCORD_ID_HERE'], // Your Discord ID
+  cooldownRoleId: '1561407866584178748',
+  cooldownMs: 3 * 60 * 60 * 1000 // 3 hours
 };
+
+// ─── COOLDOWN TRACKER ────────────────────────────
+const cooldowns = new Map(); // userId → timestamp
+
+function isOnCooldown(userId) {
+  if (!cooldowns.has(userId)) return false;
+  const lastUsed = cooldowns.get(userId);
+  return Date.now() - lastUsed < CONFIG.cooldownMs;
+}
+
+function getRemainingTime(userId) {
+  const lastUsed = cooldowns.get(userId);
+  const remaining = CONFIG.cooldownMs - (Date.now() - lastUsed);
+  const hours = Math.floor(remaining / (1000 * 60 * 60));
+  const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+  return `${hours}h ${mins}m`;
+}
+
+function setCooldown(userId) {
+  cooldowns.set(userId, Date.now());
+}
 
 // ─── FILE HELPERS ───────────────────────────────
 function loadJSON(path, fallback = {}) {
@@ -25,37 +47,27 @@ function saveJSON(path, data) {
 
 // ─── STOCK MANAGEMENT ────────────────────────────
 function getStock() {
-  return loadJSON('./stock.json', {}); // { ServiceName: [accounts] }
-}
-
-function ensureServiceAndRefill(serviceName) {
-  let stock = getStock();
-  
-  // Create service if missing
-  if (!stock[serviceName] || !Array.isArray(stock[serviceName])) {
-    stock[serviceName] = [];
-  }
-
-  // ✅ AUTO-REFILL WHEN EMPTY
-  if (stock[serviceName].length === 0) {
-    // Generate placeholder accounts — customize format to match yours!
-    for (let i = 0; i < CONFIG.autoRefillAmount; i++) {
-      const genEmail = `auto${Math.random().toString(36).substring(2, 10)}@example.com`;
-      const genPass = `Pass${Math.random().toString(36).substring(2, 8)}!`;
-      stock[serviceName].push(`${genEmail}:${genPass}`);
-    }
-    saveJSON('./stock.json', stock);
-    console.log(`✅ Auto-refilled "${serviceName}" with ${CONFIG.autoRefillAmount} accounts`);
-  }
-
-  return stock;
+  return loadJSON('./stock.json', {});
 }
 
 function takeAccount(serviceName) {
-  let stock = ensureServiceAndRefill(serviceName);
-  const account = stock[serviceName].shift(); // Take first
+  const stock = getStock();
+  if (!stock[serviceName] || !Array.isArray(stock[serviceName]) || stock[serviceName].length === 0) {
+    return null;
+  }
+  const account = stock[serviceName].shift();
   saveJSON('./stock.json', stock);
   return account;
+}
+
+function addAccounts(serviceName, accountList) {
+  const stock = getStock();
+  if (!stock[serviceName] || !Array.isArray(stock[serviceName])) {
+    stock[serviceName] = [];
+  }
+  stock[serviceName].push(...accountList);
+  saveJSON('./stock.json', stock);
+  return stock[serviceName].length;
 }
 
 // ─── INIT BOT ────────────────────────────────────
@@ -84,91 +96,91 @@ client.on('messageCreate', async message => {
       .setDescription('Available services & stock levels')
       .setColor('#9b59b6');
 
-    const entries = Object.entries(stock);
-    if (entries.length === 0) {
-      embed.addFields({ name: 'No services yet', value: 'Use `!restock ServiceName` to add stock' });
-    } else {
-      for (const [name, accs] of entries) {
-        embed.addFields({
-          name: name,
-          value: `${accs.length} in stock`,
-          inline: true
-        });
-      }
+    const services = ['paypal', 'fortnite', 'aboodi', 'valorant'];
+    for (const svc of services) {
+      const count = stock[svc]?.length || 0;
+      embed.addFields({
+        name: svc,
+        value: count > 0 ? `${count} in stock` : 'undefined in stock',
+        inline: true
+      });
     }
     message.reply({ embeds: [embed] });
     return;
   }
 
-  // ─── !gen ServiceName ─ AUTO-REFILL ────────────
+  // ─── !gen ServiceName ─────────────────────────
   if (cmd === 'gen') {
-    const serviceName = args[0];
+    const serviceName = args[0]?.toLowerCase();
     if (!serviceName) {
-      return message.reply('❌ Usage: `!gen ServiceName`');
+      return message.reply('❌ Usage: `!gen ServiceName`\nExamples: `!gen fortnite` | `!gen paypal`');
+    }
+
+    // Check if user has the cooldown role
+    const member = message.guild?.members.cache.get(message.author.id);
+    const hasCooldownRole = member?.roles.cache.has(CONFIG.cooldownRoleId);
+
+    if (hasCooldownRole && isOnCooldown(message.author.id)) {
+      return message.reply(`⏳ You're on cooldown! Please wait **${getRemainingTime(message.author.id)}** before generating again.`);
+    }
+
+    const account = takeAccount(serviceName);
+    
+    if (!account) {
+      return message.reply(
+        '📦 **SOLD OUT**\n' +
+        'No stock available right now.\n' +
+        'Please ping @gen stock access to restock!'
+      );
+    }
+
+    // Set cooldown ONLY if they have the role
+    if (hasCooldownRole) {
+      setCooldown(message.author.id);
     }
 
     try {
-      const account = takeAccount(serviceName);
       await message.author.send(`🔑 **${serviceName}**\n\`${account}\``);
       message.reply(`✅ Sent **${serviceName}** account in DMs!`);
-    } catch (err) {
-      console.error(err);
-      message.reply('❌ Something went wrong — try again.');
+    } catch {
+      message.reply('❌ Could not DM you — check privacy settings.');
     }
     return;
   }
 
-  // ─── !stock ────────────────────────────────────
-  if (cmd === 'stock') {
-    const stock = getStock();
-    let reply = '📦 **All Stock Levels**\n\n';
-    const entries = Object.entries(stock);
-    if (entries.length === 0) {
-      reply += 'No stock found.';
-    } else {
-      for (const [name, accs] of entries) {
-        reply += `**${name}**: ${accs.length} remaining\n`;
-      }
-    }
-    message.reply(reply);
-    return;
-  }
-
-  // ─── !restock ServiceName ─────────────────────
+  // ─── !restock ──────────────────────────────────
   if (cmd === 'restock') {
     if (!CONFIG.adminIds.includes(message.author.id)) {
       return message.reply('❌ Only admins can restock.');
     }
-    const serviceName = args.shift();
+    const serviceName = args.shift()?.toLowerCase();
     if (!serviceName) {
-      return message.reply('❌ Usage: `!restock ServiceName` then paste accounts below');
+      return message.reply('❌ Usage: `!restock fortnite`\nThen paste accounts below, one per line');
     }
-    // Everything after the command = accounts (one per line)
-    const restockText = args.join(' ');
-    const accounts = restockText.split('\n').filter(l => l.trim() && l.includes(':'));
+    const restockText = message.content.split('\n').slice(1).join('\n');
+    const accounts = restockText.split('\n')
+      .map(line => line.trim())
+      .filter(line => line && line.includes(':'));
     
     if (accounts.length === 0) {
-      return message.reply('❌ No valid accounts found — format: `email:password` one per line');
+      return message.reply('❌ No valid accounts found — format: `email:password` one per line\n\nExample:\n`!restock fortnite`\n`email@gmail.com:password`');
     }
 
-    let stock = getStock();
-    if (!stock[serviceName]) stock[serviceName] = [];
-    stock[serviceName].push(...accounts);
-    saveJSON('./stock.json', stock);
-    message.reply(`✅ Added **${accounts.length}** accounts to **${serviceName}** — total: ${stock[serviceName].length}`);
+    const total = addAccounts(serviceName, accounts);
+    message.reply(`✅ Added **${accounts.length}** accounts to **${serviceName}** — total: ${total}`);
     return;
   }
 
-  // ─── !clearstock ServiceName ──────────────────
+  // ─── !clearstock ──────────────────────────────
   if (cmd === 'clearstock') {
     if (!CONFIG.adminIds.includes(message.author.id)) {
       return message.reply('❌ Only admins can clear stock.');
     }
-    const serviceName = args[0];
+    const serviceName = args[0]?.toLowerCase();
     if (!serviceName) {
-      return message.reply('❌ Usage: `!clearstock ServiceName`');
+      return message.reply('❌ Usage: `!clearstock fortnite`');
     }
-    let stock = getStock();
+    const stock = getStock();
     stock[serviceName] = [];
     saveJSON('./stock.json', stock);
     message.reply(`✅ Cleared all stock for **${serviceName}**`);
@@ -183,7 +195,7 @@ client.on('ready', () => {
 
 // ─── LOGIN ───────────────────────────────────────
 if (!CONFIG.token) {
-  console.error('❌ DISCORD_BOT_TOKEN not set in environment variables!');
+  console.error('❌ DISCORD_BOT_TOKEN not set!');
   process.exit(1);
 }
 client.login(CONFIG.token);
