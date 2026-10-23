@@ -5,26 +5,22 @@ const fs = require('fs');
 const CONFIG = {
   prefix: '!',
   token: process.env.DISCORD_BOT_TOKEN || '',
-  adminIds: ['711334755328720947'], // Your Discord ID
+  adminIds: ['PUT_YOUR_DISCORD_ID_HERE'], // Your Discord ID
   cooldownRoleId: '1561407866584178748',
   cooldownMs: 3 * 60 * 60 * 1000 // 3 hours
 };
 
 // ─── COOLDOWN TRACKER ────────────────────────────
-const cooldowns = new Map(); // userId → timestamp
+const cooldowns = new Map();
 
 function isOnCooldown(userId) {
   if (!cooldowns.has(userId)) return false;
-  const lastUsed = cooldowns.get(userId);
-  return Date.now() - lastUsed < CONFIG.cooldownMs;
+  return Date.now() - cooldowns.get(userId) < CONFIG.cooldownMs;
 }
 
 function getRemainingTime(userId) {
-  const lastUsed = cooldowns.get(userId);
-  const remaining = CONFIG.cooldownMs - (Date.now() - lastUsed);
-  const hours = Math.floor(remaining / (1000 * 60 * 60));
-  const mins = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
-  return `${hours}h ${mins}m`;
+  const rem = CONFIG.cooldownMs - (Date.now() - cooldowns.get(userId));
+  return `${Math.floor(rem / 3600000)}h ${Math.floor((rem % 3600000) / 60000)}m`;
 }
 
 function setCooldown(userId) {
@@ -33,39 +29,29 @@ function setCooldown(userId) {
 
 // ─── FILE HELPERS ───────────────────────────────
 function loadJSON(path, fallback = {}) {
-  try {
-    if (!fs.existsSync(path)) return fallback;
-    return JSON.parse(fs.readFileSync(path, 'utf8'));
-  } catch {
-    return fallback;
-  }
+  try { return fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, 'utf8')) : fallback; }
+  catch { return fallback; }
 }
 
 function saveJSON(path, data) {
   fs.writeFileSync(path, JSON.stringify(data, null, 2));
 }
 
-// ─── STOCK MANAGEMENT ────────────────────────────
-function getStock() {
-  return loadJSON('./stock.json', {});
-}
+// ─── STOCK ──────────────────────────────────────
+function getStock() { return loadJSON('./stock.json', {}); }
 
 function takeAccount(serviceName) {
   const stock = getStock();
-  if (!stock[serviceName] || !Array.isArray(stock[serviceName]) || stock[serviceName].length === 0) {
-    return null;
-  }
-  const account = stock[serviceName].shift();
+  if (!stock[serviceName]?.length) return null;
+  const acc = stock[serviceName].shift();
   saveJSON('./stock.json', stock);
-  return account;
+  return acc;
 }
 
-function addAccounts(serviceName, accountList) {
+function addAccounts(serviceName, list) {
   const stock = getStock();
-  if (!stock[serviceName] || !Array.isArray(stock[serviceName])) {
-    stock[serviceName] = [];
-  }
-  stock[serviceName].push(...accountList);
+  if (!Array.isArray(stock[serviceName])) stock[serviceName] = [];
+  stock[serviceName].push(...list);
   saveJSON('./stock.json', stock);
   return stock[serviceName].length;
 }
@@ -82,8 +68,7 @@ const client = new Client({
 
 // ─── COMMANDS ────────────────────────────────────
 client.on('messageCreate', async message => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith(CONFIG.prefix)) return;
+  if (message.author.bot || !message.content.startsWith(CONFIG.prefix)) return;
 
   const args = message.content.slice(CONFIG.prefix.length).trim().split(/ +/);
   const cmd = args.shift().toLowerCase();
@@ -96,36 +81,25 @@ client.on('messageCreate', async message => {
       .setDescription('Available services & stock levels')
       .setColor('#9b59b6');
 
-    const services = ['paypal', 'fortnite', 'aboodi', 'valorant'];
-    for (const svc of services) {
-      const count = stock[svc]?.length || 0;
-      embed.addFields({
-        name: svc,
-        value: count > 0 ? `${count} in stock` : 'undefined in stock',
-        inline: true
-      });
-    }
-    message.reply({ embeds: [embed] });
-    return;
+    ['paypal', 'fortnite', 'aboodi', 'valorant'].forEach(svc => {
+      const n = stock[svc]?.length || 0;
+      embed.addFields({ name: svc, value: n > 0 ? `${n} in stock` : 'undefined in stock', inline: true });
+    });
+    return message.reply({ embeds: [embed] });
   }
 
   // ─── !gen ServiceName ─────────────────────────
   if (cmd === 'gen') {
     const serviceName = args[0]?.toLowerCase();
-    if (!serviceName) {
-      return message.reply('❌ Usage: `!gen ServiceName`\nExamples: `!gen fortnite` | `!gen paypal`');
-    }
+    if (!serviceName) return message.reply('❌ Usage: `!gen fortnite`');
 
-    // Check if user has the cooldown role
-    const member = message.guild?.members.cache.get(message.author.id);
-    const hasCooldownRole = member?.roles.cache.has(CONFIG.cooldownRoleId);
-
-    if (hasCooldownRole && isOnCooldown(message.author.id)) {
-      return message.reply(`⏳ You're on cooldown! Please wait **${getRemainingTime(message.author.id)}** before generating again.`);
+    // Cooldown check
+    const hasRole = message.guild?.members.cache.get(message.author.id)?.roles.cache.has(CONFIG.cooldownRoleId);
+    if (hasRole && isOnCooldown(message.author.id)) {
+      return message.reply(`⏳ You're on cooldown! Wait **${getRemainingTime(message.author.id)}** before generating again.`);
     }
 
     const account = takeAccount(serviceName);
-    
     if (!account) {
       return message.reply(
         '📦 **SOLD OUT**\n' +
@@ -134,16 +108,31 @@ client.on('messageCreate', async message => {
       );
     }
 
-    // Set cooldown ONLY if they have the role
-    if (hasCooldownRole) {
-      setCooldown(message.author.id);
-    }
+    if (hasRole) setCooldown(message.author.id);
+
+    // ─── EXACT STYLE FROM YOUR SCREENSHOT ───────
+    const claimEmbed = new EmbedBuilder()
+      .setTitle('✨ YOUR PREMIUM ACCOUNT ✨')
+      .setColor('#9b59b6')
+      .addFields(
+        { name: '', value: '✅ **CLAIMED — YOURS ALONE**', inline: false },
+        { name: 'Service', value: serviceName, inline: false },
+        { name: 'Credentials', value: `\`${account}\``, inline: false },
+        { name: '🔒 Security', value: 
+          '• This account is **PERMANENTLY** removed from stock\n' +
+          '• No one else can ever claim it\n' +
+          '• Change password immediately\n' +
+          '• Not resellable',
+          inline: false
+        }
+      )
+      .setFooter({ text: 'Keymania • Yours exclusively 💜 • Today at ' + new Date().toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) });
 
     try {
-      await message.author.send(`🔑 **${serviceName}**\n\`${account}\``);
-      message.reply(`✅ Sent **${serviceName}** account in DMs!`);
+      await message.author.send({ embeds: [claimEmbed] });
+      message.reply(`✅ Your **${serviceName}** account has been sent to your DMs!`);
     } catch {
-      message.reply('❌ Could not DM you — check privacy settings.');
+      message.reply({ embeds: [claimEmbed] });
     }
     return;
   }
@@ -155,20 +144,15 @@ client.on('messageCreate', async message => {
     }
     const serviceName = args.shift()?.toLowerCase();
     if (!serviceName) {
-      return message.reply('❌ Usage: `!restock fortnite`\nThen paste accounts below, one per line');
+      return message.reply('❌ Usage: `!restock fortnite`\\n`email:password`');
     }
-    const restockText = message.content.split('\n').slice(1).join('\n');
-    const accounts = restockText.split('\n')
-      .map(line => line.trim())
-      .filter(line => line && line.includes(':'));
-    
-    if (accounts.length === 0) {
-      return message.reply('❌ No valid accounts found — format: `email:password` one per line\n\nExample:\n`!restock fortnite`\n`email@gmail.com:password`');
+    const accounts = message.content.split('\n').slice(1)
+      .map(l => l.trim()).filter(l => l && l.includes(':'));
+    if (!accounts.length) {
+      return message.reply('❌ No valid accounts found — use format: `email:password` one per line');
     }
-
     const total = addAccounts(serviceName, accounts);
-    message.reply(`✅ Added **${accounts.length}** accounts to **${serviceName}** — total: ${total}`);
-    return;
+    return message.reply(`✅ Added **${accounts.length}** accounts to **${serviceName}** — total: ${total}`);
   }
 
   // ─── !clearstock ──────────────────────────────
@@ -177,25 +161,15 @@ client.on('messageCreate', async message => {
       return message.reply('❌ Only admins can clear stock.');
     }
     const serviceName = args[0]?.toLowerCase();
-    if (!serviceName) {
-      return message.reply('❌ Usage: `!clearstock fortnite`');
-    }
+    if (!serviceName) return message.reply('❌ Usage: `!clearstock fortnite`');
     const stock = getStock();
     stock[serviceName] = [];
     saveJSON('./stock.json', stock);
-    message.reply(`✅ Cleared all stock for **${serviceName}**`);
-    return;
+    return message.reply(`✅ Cleared all stock for **${serviceName}**`);
   }
 });
 
-// ─── READY ───────────────────────────────────────
-client.on('ready', () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-});
+client.on('ready', () => console.log(`✅ Logged in as ${client.user.tag}`));
 
-// ─── LOGIN ───────────────────────────────────────
-if (!CONFIG.token) {
-  console.error('❌ DISCORD_BOT_TOKEN not set!');
-  process.exit(1);
-}
+if (!CONFIG.token) { console.error('❌ No token set!'); process.exit(1); }
 client.login(CONFIG.token);
